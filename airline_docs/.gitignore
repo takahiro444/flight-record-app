@@ -1,0 +1,5 @@
+# Ignore PDF files (too large for git, will be uploaded to S3)
+*.pdf
+
+# Ignore macOS metadata
+.DS_Store

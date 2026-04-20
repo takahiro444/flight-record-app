@@ -1,0 +1,64 @@
+# ── Node / React ──────────────────────────────────────────────
+client/build/
+client/node_modules/
+node_modules/
+npm-debug.log*
+yarn-error.log*
+coverage/
+
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# ── Environment files (never commit secrets) ──────────────────
+.env*
+client/.env*
+!.env*.example
+!client/.env*.example
+
+# ── Credential / key files ────────────────────────────────────
+aws-credentials.sh
+.github-credentials.sh
+
+# ── Lambda build artifacts ────────────────────────────────────
+*.zip
+layer_build/
+
+# ── AgentCore runtime deployment configs (contain subnet/SG IDs,
+#    RapidAPI keys, ECR URIs — use the *.example templates instead)
+agentcore-runtime/**/network-config.json
+agentcore-runtime/**/create-runtime-direct.json
+agentcore-runtime/**/update-runtime-vpc.json
+# Build/deploy summaries and debug notes containing ECR URIs, VPC/subnet IDs
+agentcore-runtime/**/*-summary.txt
+agentcore-runtime/**/vpc-configuration.txt
+agentcore-runtime/**/update-runtime-guide.txt
+agentcore-runtime/**/ROOT_CAUSE_FOUND.md
+agentcore-runtime/**/TEST_SUMMARY.md
+
+# ── Vendored Lambda dependencies (install via requirements.txt) ─
+lambdas/store-flight-record/pg8000/
+lambdas/store-flight-record/asn1crypto/
+lambdas/store-flight-record/scramp/
+lambdas/store-flight-record/dateutil/
+lambdas/store-flight-record/six.py
+lambdas/store-flight-record/*.dist-info/
+lambdas/talk-to-flight-record/package/
+
+# ── Misc sensitive / generated files ─────────────────────────
+commands.json
+distribution-config.json
+out.json
+test-emails/
+generated-diagrams/
+
+# ── OS / Editor noise ─────────────────────────────────────────
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/

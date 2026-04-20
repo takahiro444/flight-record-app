@@ -1,0 +1,162 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Flight Tools Action Group",
+    "version": "1.0.0",
+    "description": "Action group exposing flight record analytics tools backed by Postgres."
+  },
+  "paths": {
+    "/stats_overview": {
+      "post": {
+        "operationId": "stats_overview",
+        "summary": "High-level stats: first/last flight, totals, average miles per flight.",
+        "description": "Returns first and last flight dates, total flights, total miles, and average miles per flight for the user.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/monthly_mileage_summary": {
+      "post": {
+        "operationId": "monthly_mileage_summary",
+        "summary": "Monthly mileage and flight counts for a given year.",
+        "description": "Returns per-month flight count and mileage totals for the specified year.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonthlySummaryRequest"
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/longest_flights": {
+      "post": {
+        "operationId": "longest_flights",
+        "summary": "Top-N flights by mileage with optional date bounds.",
+        "description": "Returns the longest flights by distance, optionally filtered by start/end dates and limited by count.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/LongestFlightsRequest"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/query_mileage_range": {
+      "post": {
+        "operationId": "query_mileage_range",
+        "summary": "Aggregate mileage and flight count for [start_date, end_date).",
+        "description": "Returns total mileage and flight count over the specified date range (inclusive start, exclusive end).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/QueryRangeRequest"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/recent_flights": {
+      "post": {
+        "operationId": "recent_flights",
+        "summary": "Most recent flights (ingestion schema).",
+        "description": "Returns the most recent flights up to the requested limit.",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/RecentFlightsRequest"}
+            }
+          }
+        },
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/diagnose_table_columns": {
+      "post": {
+        "operationId": "diagnose_table_columns",
+        "summary": "List columns in flight_record table.",
+        "description": "Returns column names and types for the flight_record table for diagnostics.",
+        "responses": {"200": {"description": "OK"}}
+      }
+    },
+    "/diagnose_db_settings": {
+      "post": {
+        "operationId": "diagnose_db_settings",
+        "summary": "Key PostgreSQL settings for diagnosis.",
+        "description": "Returns selected PostgreSQL settings useful for diagnosing connectivity and performance.",
+        "responses": {"200": {"description": "OK"}}
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MonthlySummaryRequest": {
+        "type": "object",
+        "properties": {
+          "year": {
+            "type": "integer",
+            "minimum": 2000
+          }
+        },
+        "required": ["year"],
+        "additionalProperties": false
+      },
+      "QueryRangeRequest": {
+        "type": "object",
+        "properties": {
+          "start_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "end_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "required": ["start_date", "end_date"],
+        "additionalProperties": false
+      },
+      "LongestFlightsRequest": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "start_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "end_date": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "RecentFlightsRequest": {
+        "type": "object",
+        "properties": {
+          "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  }
+}

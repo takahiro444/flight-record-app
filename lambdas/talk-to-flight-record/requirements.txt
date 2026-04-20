@@ -1,0 +1,12 @@
+# Dependencies for talk-to-flight-record-mcp-backend Lambda
+# Pin versions for reproducibility. Adjust Python minor version in layer path if deploying on a different runtime.
+# psycopg2-binary is convenient; for production you may prefer compiling 'psycopg2' against Amazon Linux for smaller size.
+pg8000==1.31.2
+# Boto3 is available in the Lambda runtime by default; pin if you need newer Bedrock features.
+boto3==1.34.69
+botocore==1.34.69
+# Optional: for future input schema validation (not yet imported in code)
+jsonschema==4.21.1
+
+# Strand SDK (agent framework) installed from GitHub. Replace with official package name/version when available.
+git+https://github.com/strands-agents/sdk-python.git

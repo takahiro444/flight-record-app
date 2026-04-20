@@ -1,0 +1,50 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeAgentCoreRuntime",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore-runtime:InvokeAgent"
+      ],
+      "Resource": [
+        "arn:aws:bedrock-agentcore:us-west-2:*:agent/*"
+      ]
+    },
+    {
+      "Sid": "DynamoDBJobTracking",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:Query"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:us-west-2:*:table/flight-email-parse-jobs"
+      ]
+    },
+    {
+      "Sid": "InvokeSelfAsync",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:InvokeFunction"
+      ],
+      "Resource": [
+        "arn:aws:lambda:us-west-2:*:function:proxy-email-parser-agent"
+      ]
+    },
+    {
+      "Sid": "CloudWatchLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-west-2:*:log-group:/aws/lambda/proxy-email-parser-agent:*"
+      ]
+    }
+  ]
+}

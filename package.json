@@ -1,0 +1,15 @@
+{
+  "name": "flight-record-app",
+  "version": "1.0.0",
+  "description": "React (Material UI) single-page app calling existing AWS API Gateway + Lambda endpoints; no local Node backend.",
+  "main": "src/index.jsx",
+  "scripts": {
+    "start": "npm start --prefix client",
+    "build": "npm run build --prefix client",
+    "deploy": "npm run build --prefix client && aws s3 sync client/build s3://your-s3-bucket-name"
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

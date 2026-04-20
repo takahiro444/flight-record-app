@@ -1,0 +1,19 @@
+FROM public.ecr.aws/docker/library/python:3.11-slim
+
+WORKDIR /app
+
+# Set environment variables for Docker
+ENV DOCKER_CONTAINER=true \
+    PYTHONUNBUFFERED=1
+
+# Install only bedrock-agentcore
+RUN pip install --no-cache-dir bedrock-agentcore>=0.1.0
+
+# Copy minimal entrypoint
+COPY minimal_entrypoint.py agentcore_entrypoint.py
+
+# Expose port 8080
+EXPOSE 8080
+
+# Run the minimal app with explicit Python unbuffered mode
+CMD ["python", "-u", "agentcore_entrypoint.py"]

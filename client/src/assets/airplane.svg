@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Flight Record App Logo</title>
+  <desc id="desc">Stylized airplane viewed from the top</desc>
+  <path fill="#DCEAEF" d="M224 0h64v512h-64z"/>
+  <path fill="#9ABAC5" d="M288 512H256V0l64 144v224z"/>
+  <path fill="#B3D1D8" d="M0 96h96l64 144H0zM0 368h96l64-144H0z"/>
+  <path fill="#9ABAC5" d="M512 304c0 35.3-28.7 64-64 64H160l32-80H448c35.3 0 64 28.7 64 64z"/>
+  <path fill="#B3D1D8" d="M448 144H192l-32 80h320c35.3 0 64 28.7 64 64s-28.7 64-64 64H160l32-80h256c35.3 0 64-28.7 64-64s-28.7-64-64-64z"/>
+  <path fill="#0E779B" d="M176 240h32v32h-32zM240 240h32v32h-32zM304 240h32v32h-32zM368 240h32v32h-32zM432 240h32v32h-32z"/>
+</svg>

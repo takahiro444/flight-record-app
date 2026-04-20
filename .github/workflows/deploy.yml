@@ -1,0 +1,74 @@
+name: Build and Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # Allow manual trigger from GitHub UI
+
+# Required for OIDC authentication with AWS (no long-lived access keys needed)
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --prefix client
+
+      # REACT_APP_* vars are baked into the JS bundle at build time.
+      # They come from GitHub repository Secrets (Settings → Secrets and variables → Actions).
+      # See client/.env.production.example for the full list of required variables.
+      - name: Build
+        env:
+          REACT_APP_API_BASE_URL: ${{ secrets.REACT_APP_API_BASE_URL }}
+          REACT_APP_COGNITO_DOMAIN: ${{ secrets.REACT_APP_COGNITO_DOMAIN }}
+          REACT_APP_COGNITO_CLIENT_ID: ${{ secrets.REACT_APP_COGNITO_CLIENT_ID }}
+          REACT_APP_COGNITO_REDIRECT_URI: ${{ secrets.REACT_APP_COGNITO_REDIRECT_URI }}
+          REACT_APP_COGNITO_LOGOUT_URI: ${{ secrets.REACT_APP_COGNITO_LOGOUT_URI }}
+        run: npm run build --prefix client
+
+      # Authenticate to AWS via OIDC — no AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY needed.
+      # Prerequisites (one-time AWS setup):
+      #   1. Create an IAM OIDC identity provider for token.actions.githubusercontent.com
+      #   2. Create an IAM role with a trust policy scoped to this repo and branch
+      #   3. Attach permissions: s3:PutObject, s3:DeleteObject, s3:ListBucket, cloudfront:CreateInvalidation
+      #   4. Add the role ARN as GitHub secret AWS_ROLE_ARN
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-west-2
+
+      # Syncs the React build to the /app/ prefix in S3.
+      # Static assets (JS/CSS) get long-term caching; index.html is never cached
+      # so users always get the latest version after a deploy.
+      - name: Deploy to S3
+        run: |
+          aws s3 sync client/build s3://${{ secrets.S3_BUCKET_NAME }}/app/ \
+            --delete \
+            --exclude "index.html" \
+            --cache-control "public,max-age=31536000,immutable"
+          aws s3 cp client/build/index.html s3://${{ secrets.S3_BUCKET_NAME }}/app/index.html \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      # Purge CloudFront so users get the new index.html immediately.
+      # Static assets don't need invalidation because they have content-hashed filenames.
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/app/index.html"
