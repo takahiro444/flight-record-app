@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Container, CssBaseline, Typography, Button, AppBar, Toolbar, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Stack, Alert, Box, Grid, Card, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Divider } from '@mui/material';
+import { Container, CssBaseline, Typography, Button, AppBar, Toolbar, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Stack, Alert, Box, Grid, Card, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Divider, Dialog, IconButton, Tooltip, Fade } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
@@ -12,6 +12,8 @@ import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import PersonIcon from '@mui/icons-material/Person';
 import HubIcon from '@mui/icons-material/Hub';
 import EmailIcon from '@mui/icons-material/Email';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import CloseIcon from '@mui/icons-material/Close';
 import FlightForm from './components/FlightForm';
 import FlightTable from './components/FlightTable';
 import Layout from './components/Layout';
@@ -207,7 +209,12 @@ const SecurityRow = ({ icon: Icon, label, body }) => (
   </Stack>
 );
 
-const ApplicationOverview = () => (
+const ARCHITECTURE_IMG = '/app/architecture-diagram.png';
+const ARCHITECTURE_ALT = 'AWS architecture: CloudFront, API Gateway, Lambda, RDS, ECR, Bedrock agents';
+
+const ApplicationOverview = () => {
+  const [expanded, setExpanded] = useState(false);
+  return (
   <Stack spacing={4} sx={{ pt: 1, pb: 1 }}>
     {/* Capabilities */}
     <Box>
@@ -282,31 +289,118 @@ const ApplicationOverview = () => (
 
     <Divider />
 
-    {/* Architecture diagram */}
+    {/* Architecture diagram — click the expand button (or the image) for a
+        full-screen view with the full pixel detail. */}
     <Box>
       <OverviewSectionHeading>Architecture</OverviewSectionHeading>
       <Box
         sx={{
+          position: 'relative',
           mt: 1.5,
           borderRadius: 3,
           overflow: 'hidden',
           border: '1px solid',
           borderColor: 'divider',
           bgcolor: 'background.paper',
+          cursor: 'zoom-in',
+          transition: 'box-shadow 180ms ease',
+          '&:hover': { boxShadow: '0 2px 4px 0 rgba(11, 87, 208, 0.12), 0 6px 12px 4px rgba(11, 87, 208, 0.08)' },
+          '&:hover .expand-diagram-button': { opacity: 1 },
         }}
+        onClick={() => setExpanded(true)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(true); } }}
+        aria-label="Expand architecture diagram"
       >
         <img
-          src="/app/architecture-diagram.png"
-          alt="AWS architecture: CloudFront, API Gateway, Lambda, RDS, ECR, Bedrock agents"
+          src={ARCHITECTURE_IMG}
+          alt={ARCHITECTURE_ALT}
           style={{ width: '100%', height: 'auto', display: 'block' }}
         />
+        <Tooltip title="Expand">
+          <IconButton
+            className="expand-diagram-button"
+            size="small"
+            onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+            sx={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              opacity: 0,
+              transition: 'opacity 180ms ease, background-color 160ms ease',
+              bgcolor: 'rgba(255,255,255,0.9)',
+              color: 'primary.dark',
+              backdropFilter: 'blur(6px)',
+              '&:hover': { bgcolor: '#ffffff' },
+            }}
+            aria-label="Expand architecture diagram"
+          >
+            <OpenInFullIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
       <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-        End-to-end AWS architecture: CloudFront → API Gateway → Lambda → RDS / Bedrock / AgentCore.
+        End-to-end AWS architecture: CloudFront → API Gateway → Lambda → RDS / Bedrock / AgentCore. Click to expand.
       </Typography>
+
+      <Dialog
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        fullScreen
+        TransitionComponent={Fade}
+        PaperProps={{ sx: { bgcolor: 'rgba(15, 23, 42, 0.96)' } }}
+      >
+        <Box
+          sx={{
+            position: 'relative',
+            width: '100%',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: { xs: 2, sm: 4 },
+          }}
+          onClick={() => setExpanded(false)}
+        >
+          <Tooltip title="Close (Esc)">
+            <IconButton
+              onClick={() => setExpanded(false)}
+              aria-label="Close architecture diagram"
+              sx={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                bgcolor: 'rgba(255,255,255,0.12)',
+                color: '#ffffff',
+                backdropFilter: 'blur(8px)',
+                '&:hover': { bgcolor: 'rgba(255,255,255,0.22)' },
+              }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
+          <Box
+            component="img"
+            src={ARCHITECTURE_IMG}
+            alt={ARCHITECTURE_ALT}
+            onClick={(e) => e.stopPropagation()}
+            sx={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              width: 'auto',
+              height: 'auto',
+              borderRadius: 2,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              cursor: 'default',
+            }}
+          />
+        </Box>
+      </Dialog>
     </Box>
   </Stack>
-);
+  );
+};
 
 const App = () => {
   const [apiKeyLocal, setApiKeyLocal] = useState('');
