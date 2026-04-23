@@ -1,7 +1,17 @@
 import React, { useState } from 'react';
-import { Container, CssBaseline, Typography, Button, AppBar, Toolbar, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Stack, Alert, Box } from '@mui/material';
+import { Container, CssBaseline, Typography, Button, AppBar, Toolbar, Chip, Paper, Accordion, AccordionSummary, AccordionDetails, Stack, Alert, Box, Grid, Card, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Divider } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import FlightTakeoffIcon from '@mui/icons-material/FlightTakeoff';
+import MarkEmailReadIcon from '@mui/icons-material/MarkEmailRead';
+import TableRowsIcon from '@mui/icons-material/TableRows';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import SecurityIcon from '@mui/icons-material/Security';
+import ShieldIcon from '@mui/icons-material/Shield';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
+import PersonIcon from '@mui/icons-material/Person';
+import HubIcon from '@mui/icons-material/Hub';
+import EmailIcon from '@mui/icons-material/Email';
 import FlightForm from './components/FlightForm';
 import FlightTable from './components/FlightTable';
 import Layout from './components/Layout';
@@ -9,6 +19,294 @@ import ChatWidget from './components/ChatWidget';
 import useFlights from './hooks/useFlights';
 import { useAuth } from './auth/AuthContext';
 import planeLogo from './assets/airplane.svg';
+
+// ---------------------------------------------------------------------------
+// Pieces used inside the Application Overview accordion. Extracted here to
+// keep the main render clean; they have no props tied to app state.
+// ---------------------------------------------------------------------------
+
+const OverviewSectionHeading = ({ children }) => (
+  <Typography variant="overline" color="primary" sx={{ fontWeight: 600, letterSpacing: '0.12em' }}>
+    {children}
+  </Typography>
+);
+
+const CAPABILITY_CARDS = [
+  {
+    icon: FlightTakeoffIcon,
+    title: 'Submit a flight',
+    body: 'Enter an IATA code + date. We pull details from AeroDataBox and save a record to Postgres.',
+  },
+  {
+    icon: MarkEmailReadIcon,
+    title: 'Parse an email',
+    body: 'Paste a flight confirmation. An AI agent extracts flights and stores them for you.',
+  },
+  {
+    icon: TableRowsIcon,
+    title: 'View your records',
+    body: 'Browse stored flights, automatically scoped to your Cognito identity.',
+  },
+  {
+    icon: SmartToyIcon,
+    title: 'Chat with your data',
+    body: 'Ask questions about your flights; a supervisor orchestrates specialized sub-agents.',
+  },
+];
+
+const API_ENDPOINTS = [
+  { method: 'POST', path: '/retrieve-store-flight-data', lambda: 'retrieve-flight-data' },
+  { method: 'POST', path: '/parse-email-flights', lambda: 'proxy-email-parser-agent' },
+  { method: 'GET', path: '/parse-email-flights/status/{jobId}', lambda: 'proxy-email-parser-agent' },
+  { method: 'GET', path: '/display-flight-record-table', lambda: 'display-flight-record-table' },
+  { method: 'POST', path: '/talk-to-flight-record', lambda: 'proxy-flight-record-bedrock-agent' },
+  { method: 'GET', path: '/talk-to-flight-record/status/{jobId}', lambda: 'proxy-flight-record-bedrock-agent' },
+];
+
+const EMAIL_FLOW = {
+  icon: EmailIcon,
+  title: 'Email parser flow',
+  tags: ['Async polling', 'ARM64 AgentCore', 'Claude 3.5 Haiku'],
+  steps: [
+    { title: 'Submit', body: 'Proxy Lambda creates a DynamoDB job and returns jobId immediately.' },
+    { title: 'Extract', body: 'AgentCore Runtime (ARM64 container) pulls flights out of the email with Claude 3.5 Haiku.' },
+    { title: 'Validate', body: 'AeroDataBox enriches each flight with airline, duration, mileage — gracefully degraded for old flights.' },
+    { title: 'Store', body: 'VPC-scoped Lambda writes the records to private RDS Postgres.' },
+  ],
+};
+
+const CHAT_FLOW = {
+  icon: HubIcon,
+  title: 'Multi-agent chat flow',
+  tags: ['Async polling', 'Supervisor agent', 'Live badges'],
+  steps: [
+    { title: 'Ask', body: 'Proxy Lambda stores the job, self-invokes async, returns jobId.' },
+    { title: 'Orchestrate', body: 'Supervisor agent chooses collaborators: Flight-Record-Agent and/or Airline-Status-Agent.' },
+    { title: 'Stream', body: 'Each invoked agent is written to DynamoDB incrementally — the UI shows live badges.' },
+    { title: 'Answer', body: 'Frontend polls every 4s (max 5 min) and renders the final response.' },
+  ],
+};
+
+const SECURITY_LAYERS = [
+  { icon: ShieldIcon, label: 'WAF', body: 'Coarse filter by IP set + Referer prefix. Default-block returns 401.' },
+  { icon: SecurityIcon, label: 'Cognito JWT', body: 'All protected methods require a valid user token.' },
+  { icon: VpnKeyIcon, label: 'API key', body: 'Metered REST paths require a usage-plan key.' },
+  { icon: PersonIcon, label: 'Per-user scope', body: 'user_sub stored on every row; queries auto-filtered to the authenticated user.' },
+];
+
+const MethodChip = ({ method }) => {
+  const color = method === 'POST' ? 'info' : method === 'GET' ? 'success' : 'default';
+  return (
+    <Chip
+      size="small"
+      label={method}
+      color={color}
+      sx={{ fontFamily: 'ui-monospace, monospace', fontWeight: 600, minWidth: 52, borderRadius: 1.5 }}
+    />
+  );
+};
+
+const CapabilityCard = ({ icon: Icon, title, body }) => (
+  <Card sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
+    <Box
+      sx={{
+        width: 40,
+        height: 40,
+        borderRadius: 2,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'primary.light',
+        color: 'primary.dark',
+      }}
+    >
+      <Icon fontSize="small" />
+    </Box>
+    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{title}</Typography>
+    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>{body}</Typography>
+  </Card>
+);
+
+const FlowCard = ({ icon: Icon, title, tags, steps }) => (
+  <Card sx={{ p: 2.5, height: '100%' }}>
+    <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 1.5 }}>
+      <Box
+        sx={{
+          width: 36,
+          height: 36,
+          borderRadius: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: 'primary.light',
+          color: 'primary.dark',
+        }}
+      >
+        <Icon fontSize="small" />
+      </Box>
+      <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{title}</Typography>
+    </Stack>
+    <Stack direction="row" spacing={0.75} sx={{ mb: 2, flexWrap: 'wrap', gap: 0.75 }}>
+      {tags.map((t) => (
+        <Chip key={t} size="small" label={t} variant="outlined" />
+      ))}
+    </Stack>
+    <Stack spacing={1.5}>
+      {steps.map((step, idx) => (
+        <Stack key={step.title} direction="row" spacing={1.5} alignItems="flex-start">
+          <Box
+            sx={{
+              minWidth: 22,
+              height: 22,
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              bgcolor: 'primary.main',
+              color: 'primary.contrastText',
+              fontSize: '0.7rem',
+              fontWeight: 600,
+              mt: 0.25,
+            }}
+          >
+            {idx + 1}
+          </Box>
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{step.title}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+              {step.body}
+            </Typography>
+          </Box>
+        </Stack>
+      ))}
+    </Stack>
+  </Card>
+);
+
+const SecurityRow = ({ icon: Icon, label, body }) => (
+  <Stack direction="row" spacing={1.5} alignItems="flex-start">
+    <Box
+      sx={{
+        minWidth: 32,
+        height: 32,
+        borderRadius: 1.5,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'primary.light',
+        color: 'primary.dark',
+        mt: 0.25,
+      }}
+    >
+      <Icon fontSize="small" />
+    </Box>
+    <Box>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{label}</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>{body}</Typography>
+    </Box>
+  </Stack>
+);
+
+const ApplicationOverview = () => (
+  <Stack spacing={4} sx={{ pt: 1, pb: 1 }}>
+    {/* Capabilities */}
+    <Box>
+      <OverviewSectionHeading>What you can do</OverviewSectionHeading>
+      <Grid container spacing={2} sx={{ mt: 0.5 }}>
+        {CAPABILITY_CARDS.map((c) => (
+          <Grid item xs={12} sm={6} md={3} key={c.title}>
+            <CapabilityCard {...c} />
+          </Grid>
+        ))}
+      </Grid>
+    </Box>
+
+    {/* API endpoints */}
+    <Box>
+      <OverviewSectionHeading>API endpoints</OverviewSectionHeading>
+      <TableContainer sx={{ mt: 1 }}>
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ width: 80 }}>Method</TableCell>
+              <TableCell>Path</TableCell>
+              <TableCell>Lambda</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {API_ENDPOINTS.map((e) => (
+              <TableRow key={e.path}>
+                <TableCell>
+                  <MethodChip method={e.method} />
+                </TableCell>
+                <TableCell>
+                  <Typography variant="body2" component="code" sx={{ fontFamily: 'ui-monospace, monospace' }}>
+                    {e.path}
+                  </Typography>
+                </TableCell>
+                <TableCell>
+                  <Chip size="small" variant="outlined" label={e.lambda} sx={{ fontFamily: 'ui-monospace, monospace' }} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        Stage <code>prod</code> on API Gateway <strong>FlightRecordAPI</strong>. Lambdas run Python 3.9/3.12 inside a VPC and read DB credentials from environment.
+      </Typography>
+    </Box>
+
+    {/* Flow cards */}
+    <Box>
+      <OverviewSectionHeading>How the AI flows work</OverviewSectionHeading>
+      <Grid container spacing={2} sx={{ mt: 0.5 }}>
+        <Grid item xs={12} md={6}>
+          <FlowCard {...EMAIL_FLOW} />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <FlowCard {...CHAT_FLOW} />
+        </Grid>
+      </Grid>
+    </Box>
+
+    {/* Security */}
+    <Box>
+      <OverviewSectionHeading>Security & isolation</OverviewSectionHeading>
+      <Stack spacing={1.5} sx={{ mt: 1.5 }}>
+        {SECURITY_LAYERS.map((s) => (
+          <SecurityRow key={s.label} {...s} />
+        ))}
+      </Stack>
+    </Box>
+
+    <Divider />
+
+    {/* Architecture diagram */}
+    <Box>
+      <OverviewSectionHeading>Architecture</OverviewSectionHeading>
+      <Box
+        sx={{
+          mt: 1.5,
+          borderRadius: 3,
+          overflow: 'hidden',
+          border: '1px solid',
+          borderColor: 'divider',
+          bgcolor: 'background.paper',
+        }}
+      >
+        <img
+          src="/app/architecture-diagram.png"
+          alt="AWS architecture: CloudFront, API Gateway, Lambda, RDS, ECR, Bedrock agents"
+          style={{ width: '100%', height: 'auto', display: 'block' }}
+        />
+      </Box>
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+        End-to-end AWS architecture: CloudFront → API Gateway → Lambda → RDS / Bedrock / AgentCore.
+      </Typography>
+    </Box>
+  </Stack>
+);
 
 const App = () => {
   const [apiKeyLocal, setApiKeyLocal] = useState('');
@@ -54,126 +352,13 @@ const App = () => {
       <Container maxWidth="md" sx={{ pb: 6 }}>
         <Accordion defaultExpanded={false} sx={{ mb: 4 }} disableGutters elevation={1}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-controls="overview-content" id="overview-header">
-            <Typography variant="subtitle1">Application Overview</Typography>
+            <Stack direction="row" spacing={1.5} alignItems="center">
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Application Overview</Typography>
+              <Chip size="small" label="Architecture & API reference" variant="outlined" />
+            </Stack>
           </AccordionSummary>
           <AccordionDetails>
-            <Typography variant="body2" paragraph>
-              This React frontend (Material UI) provides four primary capabilities: (1) submit a flight to be retrieved and stored, (2) <strong>parse confirmation emails</strong> to automatically extract and store flights, (3) view stored flight records, and (4) chat with multi-agent AI system for stats insights and airline status queries.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              Core REST paths (API Gateway <strong>FlightRecordAPI</strong>, stage <code>prod</code>):
-            </Typography>
-            <Typography component="div" variant="body2" sx={{ ml: 2 }}>
-              • <code>POST /retrieve-store-flight-data</code> (Lambda: <strong>retrieve-flight-data</strong>) – pulls flight data (AeroDataBox via RapidAPI) and stores a record in RDS Postgres.<br />
-              • <code>POST /parse-email-flights</code> (Lambda: <strong>proxy-email-parser-agent</strong>) – initiates async email parsing via AgentCore Runtime, returns jobId immediately.<br />
-              • <code>GET /parse-email-flights/status/{`{jobId}`}</code> – polls email parsing job status with real-time progress updates.<br />
-              • <code>GET /display-flight-record-table</code> (Lambda: <strong>display-flight-record-table</strong>) – queries the <code>flight_record</code> table and returns rows.<br />
-              • <code>POST /talk-to-flight-record</code> (Lambda: <strong>proxy-flight-record-bedrock-agent</strong>) – initiates async AI query, returns jobId immediately.<br />
-              • <code>GET /talk-to-flight-record/status/{`{jobId}`}</code> – polls async job status with real-time agent progress updates.
-            </Typography>
-            <Typography variant="body2" paragraph sx={{ mt: 2 }}>
-              Data persistence: Lambdas run Python 3.9/3.12 inside a VPC and connect to an RDS Postgres instance using environment variables for credentials. The <code>psycopg2</code> layer is attached for database access.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              <strong>Email Parser Architecture:</strong> The email parser uses AWS Bedrock AgentCore Runtime with an <strong>ARM64 container</strong> running Claude 3.5 Haiku. When you paste a confirmation email, the proxy Lambda creates a job in DynamoDB (<code>email-parse-jobs</code>) and invokes the AgentCore Runtime asynchronously. The Runtime extracts flight details from the email text, validates flights against AeroDataBox API (enriching with airline name, duration, mileage), and stores records via a VPC Lambda proxy (<code>store-flight-record</code>) to maintain RDS security (private subnet only). The parser gracefully degrades for historical flights outside API retention, storing email-extracted data without enrichment.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              <strong>Multi-Agent AI Architecture:</strong> The chat widget uses async polling pattern to handle complex queries that exceed API Gateway's 29-second timeout. When you submit a question, the proxy Lambda creates a job in DynamoDB (<code>flight-chat-jobs</code>) with status PENDING, then invokes itself asynchronously for background processing. The frontend polls every 4 seconds (max 5 minutes) to check job status.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              The background Lambda invokes the <strong>Supervisor Agent</strong>, which orchestrates collaboration between specialized agents: <strong>Flight-Record-Agent</strong> for your flight data and <strong>Airline-Status-Agent</strong> for elite status benefits. As each agent is invoked, the Lambda writes the agent name to DynamoDB incrementally, enabling real-time badge display in the UI showing which agents are actively analyzing your request. All agents use Claude 3.5 Haiku via Bedrock.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              Security boundary layers now include: (1) AWS WAF WebACL for coarse filtering (IP set + Referer prefix), (2) Cognito User Pool authorizer enforcing valid user tokens on protected methods (including chat), and (3) API Gateway usage plan + API key for metering of REST paths. Unauthenticated calls receive 401; authenticated without key on metered REST paths receive 403.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              Per-user data isolation is achieved by storing <code>user_sub</code> and <code>user_email</code> with each record and filtering queries server-side. The GET endpoint returns only your records (flag <code>filtered=true</code>) when authenticated; the chat system automatically scopes all database queries to your Cognito <code>sub</code> claim, ensuring complete data isolation across users.
-            </Typography>
-            <Typography variant="body2" paragraph>
-              This card view standardizes the UX versus the original HTML while keeping architecture changes minimal: no additional backend layer, direct invocation of existing Lambdas, and reuse of the same API Gateway stage. The async polling pattern ensures complex multi-agent queries complete successfully without timeout errors.
-            </Typography>
-            <Typography variant="body2" gutterBottom sx={{ fontWeight: 600 }}>Architecture Diagram</Typography>
-            <Box sx={{ mt: 2, mb: 2, maxWidth: '100%', overflow: 'auto' }}>
-              <img 
-                src="/app/architecture-diagram.png" 
-                alt="AWS Architecture Diagram showing CloudFront, API Gateway, Lambda functions, RDS, NAT Gateway, ECR, and Bedrock agents"
-                style={{ width: '100%', height: 'auto', border: '1px solid #e0e0e0', borderRadius: '4px' }}
-              />
-              <Typography variant="caption" display="block" sx={{ mt: 1, color: 'text.secondary' }}>
-                Complete AWS architecture including NAT Gateway for external API calls and ECR for container images
-              </Typography>
-            </Box>
-            <Typography variant="body2" gutterBottom sx={{ fontWeight: 600, mt: 2 }}>Architecture Diagram (ASCII - Simplified)</Typography>
-            <Typography component="pre" variant="caption" sx={{ p: 1, bgcolor: 'grey.100', overflow: 'auto', maxHeight: 320 }}>
-{`           +--------------------------------------+                 
-     |         CloudFront (SPA)             |
-     |  Default root: app/index.html        |
-     +----------------+---------------------+
-          |
-+----------------------+    |    +--------------------+    +-------------------+
-| Legacy HTML (S3)     |    |    | React SPA (S3/app) |    | Local Dev (Proxy) |
-+----------+-----------+    |    +---------+----------+    +----------+--------+
-     | Referer         |            | Referer                 | Inject Referer
-     v                 |            v                         v
-  +------------------------ WAF WebACL ------------------------+
-  |  Allow: IP Set, Referer starts-with S3 URL | Block: 401    |
-  +-----------------------------+------------------------------+
-              v
-         +-----------------------+
-         | API Gateway prod      |
-         +-----------+-----------+
-               |
-     +---------+----------+----------+----------+----------+----------+
-     |         |          |          |          |          |          |
- POST /ret  GET /disp POST /parse POST /talk GET /parse GET /talk
-  -store     -flight   -email      -to-flight /status    /status
-  -flight    -table    -flights    -record    /{jobId}   /{jobId}
-     |         |          |          |          |          |
-   +-v---+ +--v---+  +---v---------+ +--------v--------+ | |
-   |Retr.| |Disp.|  |proxy-email  | |proxy-bedrock    | | |
-   |py3.9| |py3.9|  |-parser-agent| |-agent (py3.12)  | | |
-   +--+--+ +--+--+  +------+------+ +--------+--------+ | |
-      |       |            |                 |          | |
-      v       v            v                 v          v v
-   +------+ +------+ +------------+   +-----------+ +-------+ +-------+
-   | RDS  | | RDS  | | DynamoDB   |   | DynamoDB  | | Dynamo| | Dynamo|
-   |flight| |query | |email-parse-|   |flight-chat| | (read)| | (read)|
-   +------+ +------+ |jobs (job)  |   |-jobs (job)| +-------+ +-------+
-                     +-----+------+   +-----+-----+
-                           |                |
-          +----------------+                +------------------+
-          | Async invoke                    | Async invoke self
-          v                                 v
-    +---------------------+        +-----------------------+
-    | AgentCore Runtime   |        | Background: Bedrock   |
-    | parse_email_agent_v2|        | Supervisor Agent      |
-    | ARM64 container     |        | Multi-agent collab    |
-    +----------+----------+        +-----------+-----------+
-               |                               |
-        +------+------+                 +------+------+
-        |             |                 |             |
-        v             v                 v             v
-    +-------+   +--------+       +-----------+ +----------+
-    |Bedrock|   |Aerodatab|      |Flight-Rec.| |Airline-  |
-    |Claude |   |ox API   |      |Agent      | |Status-Agt|
-    +-------+   +----+---+       +-----+-----+ +-----+----+
-                     |                 |             |
-                     v                 v             v
-              [Enrich flight]    [DB queries]  [Status lookup]
-                     |                 |             |
-                     v                 v             v
-              +-------------+    +-------------------------+
-              |Lambda: store|    | UPDATE DynamoDB:        |
-              |-flight-rec. |    | status: COMPLETED       |
-              |(VPC, pg8000)|    | answer + agents_invoked |
-              +------+------+    +-------------------------+
-                     |
-                     v
-              +------------+
-              | RDS Private|
-              | (VPC only) |
-              +------------+`}
-            </Typography>
+            <ApplicationOverview />
           </AccordionDetails>
         </Accordion>
         <Paper elevation={3} sx={{ p: 3, mb: 4 }}>
