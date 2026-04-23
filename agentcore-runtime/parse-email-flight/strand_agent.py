@@ -7,6 +7,7 @@ checks for duplicates, and stores only new flights.
 """
 
 import asyncio
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from strands.agent import Agent
@@ -31,7 +32,10 @@ def _build_model() -> BedrockModel:
 
 
 def _system_prompt() -> str:
-    return """You are an expert flight email parser. Your mission:
+    today = datetime.now(timezone.utc).date()
+    return f"""You are an expert flight email parser. Your mission:
+
+**Today's date (UTC): {today.isoformat()} ({today.strftime('%A')})**
 
 1. **Extract ALL flights** from the email text (look for flight numbers, dates, airlines)
 2. For EACH flight found, follow this sequence:
@@ -48,12 +52,19 @@ def _system_prompt() -> str:
    - List failed validations
 
 4. **Be thorough**:
-   - Parse dates in various formats (Jan 25, 01/25/2026, 2026-01-25, etc.)
+   - Parse dates in various formats (Jan 25, 01/25/2026, 2026-01-25, 02MAR, Mon 02 Mar, etc.)
    - Extract flight codes with/without spaces (UA 234, UA234, United 234)
    - Handle multi-flight itineraries (round trips, connections)
    - Don't stop at the first flight - process ALL flights in the email
 
-5. **Return a complete summary** with structured data for frontend display.
+5. **Year inference — IMPORTANT**:
+   - Emails often show a day and month without a year (e.g. "Mon, 02MAR", "March 2", "02 Mar").
+   - Use TODAY'S DATE above as the anchor. Never assume the year from your training data.
+   - If the email includes a weekday (e.g. "Mon"), pick the year closest to today where that weekday matches that month/day. Default to the current year or the next year — past years should only be chosen when the email is clearly a historical receipt.
+   - Airline confirmations are almost always for upcoming travel, so prefer the current or next year over prior years.
+   - Verify by running validate_flight_exists with the chosen date. If it fails with "flight not found" and the email has no explicit year, try the next plausible year.
+
+6. **Return a complete summary** with structured data for frontend display.
 
 IMPORTANT: Always validate before checking duplicates, and always check duplicates before storing.
 """
