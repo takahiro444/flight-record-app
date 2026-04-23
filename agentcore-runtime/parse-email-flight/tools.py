@@ -1,4 +1,4 @@
-"""  
+"""
 Tool implementations for Email Parser Agent.
 These tools run inside AgentCore Runtime alongside the agent.
 """
@@ -18,8 +18,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Lambda client initialized lazily
+# AWS clients initialized lazily
 _lambda_client = None
+_secrets_client = None
+_cached_rapidapi_key = None
+
 
 def _get_lambda_client():
     """Get or create Lambda client (lazy initialization)."""
@@ -27,6 +30,55 @@ def _get_lambda_client():
     if _lambda_client is None:
         _lambda_client = boto3.client('lambda', region_name='us-west-2')
     return _lambda_client
+
+
+def _get_rapidapi_key() -> str:
+    """
+    Fetch the RapidAPI key.
+    Prefers RAPIDAPI_SECRET_ARN (Secrets Manager) and falls back to the
+    RAPIDAPI_KEY env var for local dev and transition.
+    """
+    global _secrets_client, _cached_rapidapi_key
+    if _cached_rapidapi_key:
+        return _cached_rapidapi_key
+
+    secret_arn = os.environ.get('RAPIDAPI_SECRET_ARN')
+    if secret_arn:
+        if _secrets_client is None:
+            _secrets_client = boto3.client(
+                'secretsmanager',
+                region_name=os.environ.get('AWS_REGION', 'us-west-2'),
+            )
+        try:
+            resp = _secrets_client.get_secret_value(SecretId=secret_arn)
+            secret_str = resp.get('SecretString', '')
+            try:
+                parsed = json.loads(secret_str)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                _cached_rapidapi_key = (
+                    parsed.get('api_key')
+                    or parsed.get('RAPIDAPI_KEY')
+                    or parsed.get('rapidapi_key')
+                )
+            else:
+                _cached_rapidapi_key = secret_str
+            if _cached_rapidapi_key:
+                return _cached_rapidapi_key
+            raise ToolError("RAPIDAPI secret value did not contain an api_key field")
+        except Exception as e:
+            # Fall through to env-var path if Secrets Manager fails.
+            logger.warning(f"[RAPIDAPI] Secrets Manager fetch failed, falling back to env: {type(e).__name__}: {e}")
+
+    env_val = os.environ.get('RAPIDAPI_KEY')
+    if env_val:
+        _cached_rapidapi_key = env_val
+        return env_val
+
+    raise ToolError(
+        "RAPIDAPI_SECRET_ARN not configured and RAPIDAPI_KEY env var missing"
+    )
 
 
 class ToolError(Exception):
@@ -46,13 +98,7 @@ def validate_flight_exists(user_sub: str, flight_iata: str, date: str) -> Dict[s
     Returns:
         Dict with exists, flight_iata, date, and enriched flight data
     """
-    import sys
-    api_key = os.environ.get('RAPIDAPI_KEY')
-    
-    # Include diagnostic info in the error message that will reach the user
-    if not api_key:
-        all_env_vars = list(os.environ.keys())
-        raise ToolError(f"RAPIDAPI_KEY not configured. Available env vars: {', '.join(sorted(all_env_vars)[:10])}")
+    api_key = _get_rapidapi_key()
     
     url = f"https://aerodatabox.p.rapidapi.com/flights/number/{flight_iata}/{date}?dateLocalRole=Departure"
     headers = {

@@ -1,8 +1,59 @@
 import json
 import os
+import boto3
 import psycopg2
 import requests
 from datetime import datetime
+
+
+# Lazy-initialized Secrets Manager client + cached key value.
+_secrets_client = None
+_cached_rapidapi_key = None
+
+
+def _get_rapidapi_key():
+    """
+    Fetch the RapidAPI key.
+    Prefers RAPIDAPI_SECRET_ARN (Secrets Manager) and falls back to
+    RAPIDAPI_KEY env var for local dev / transition.
+    """
+    global _secrets_client, _cached_rapidapi_key
+    if _cached_rapidapi_key:
+        return _cached_rapidapi_key
+
+    secret_arn = os.environ.get('RAPIDAPI_SECRET_ARN')
+    if secret_arn:
+        if _secrets_client is None:
+            _secrets_client = boto3.client(
+                'secretsmanager',
+                region_name=os.environ.get('AWS_REGION', 'us-west-2'),
+            )
+        try:
+            resp = _secrets_client.get_secret_value(SecretId=secret_arn)
+            secret_str = resp.get('SecretString', '')
+            try:
+                parsed = json.loads(secret_str)
+            except (json.JSONDecodeError, TypeError):
+                parsed = None
+            if isinstance(parsed, dict):
+                _cached_rapidapi_key = (
+                    parsed.get('api_key')
+                    or parsed.get('RAPIDAPI_KEY')
+                    or parsed.get('rapidapi_key')
+                )
+            else:
+                _cached_rapidapi_key = secret_str
+            if _cached_rapidapi_key:
+                return _cached_rapidapi_key
+        except Exception as e:
+            print(f"[RAPIDAPI] Secrets Manager fetch failed, falling back to env: {type(e).__name__}: {e}")
+
+    env_val = os.environ.get('RAPIDAPI_KEY')
+    if env_val:
+        _cached_rapidapi_key = env_val
+        return env_val
+
+    raise KeyError("RAPIDAPI_SECRET_ARN not configured and RAPIDAPI_KEY env var missing")
 
 def lambda_handler(event, context):
 
@@ -55,7 +106,7 @@ def lambda_handler(event, context):
         }
 
     ### API request to retrieve flight details from rapidapi.com
-    api_key = os.environ['RAPIDAPI_KEY']
+    api_key = _get_rapidapi_key()
     url = f"https://aerodatabox.p.rapidapi.com/flights/number/{flight_iata}/{date}?dateLocalRole=Departure"
     
     headers = {
