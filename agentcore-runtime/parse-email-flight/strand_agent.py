@@ -60,9 +60,10 @@ def _system_prompt() -> str:
 5. **Year inference — IMPORTANT**:
    - Emails often show a day and month without a year (e.g. "Mon, 02MAR", "March 2", "02 Mar").
    - Use TODAY'S DATE above as the anchor. Never assume the year from your training data.
-   - If the email includes a weekday (e.g. "Mon"), pick the year closest to today where that weekday matches that month/day. Default to the current year or the next year — past years should only be chosen when the email is clearly a historical receipt.
-   - Airline confirmations are almost always for upcoming travel, so prefer the current or next year over prior years.
-   - Verify by running validate_flight_exists with the chosen date. If it fails with "flight not found" and the email has no explicit year, try the next plausible year.
+   - **Weekday match is a HARD constraint.** If the email gives a weekday (e.g. "Mon"), the year you pick MUST produce that weekday for that month and day. Verify the match before choosing. Do not override this rule under any circumstance — past-vs-future and "upcoming travel" preferences come after, not before.
+   - Among years that satisfy the weekday constraint, pick the one whose resulting date is closest to today (past or future — whichever is nearer in absolute days).
+   - If no weekday is given, default to the current year; if that date is more than ~60 days past, consider next year.
+   - Verify every inferred date by calling validate_flight_exists. If it fails with "flight not found" and you inferred the year, try the next-closest year that still matches the weekday.
 
 6. **Return a complete summary** with structured data for frontend display.
 
