@@ -17,7 +17,6 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import EmailIcon from '@mui/icons-material/Email';
 import EditIcon from '@mui/icons-material/Edit';
-import { API_BASE_URL } from '../config';
 import { postEmailParser, pollEmailParserResult } from '../utils/api';
 import { useAuth } from '../auth/AuthContext';
 
@@ -164,8 +163,6 @@ const FlightForm = ({ onApiKeyChange, fetchFlightData, loading, error }) => {
 
   return (
     <Box>
-      <Typography variant="caption" display="block" sx={{ mb: 1 }}>API Base: {API_BASE_URL || 'NOT SET'}</Typography>
-      
       {/* API Key Field - Always shown */}
       <TextField
         label="API Key"
