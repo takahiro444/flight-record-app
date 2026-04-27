@@ -47,26 +47,6 @@ export const fetchFlightRecords = async (apiKey) => {
   }
 };
 
-// Retrieve authenticated identity from backend. Requires idToken in Authorization header.
-export const fetchWhoAmI = async (idToken) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/whoami`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`Failed to fetch whoami (${response.status})`);
-    }
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching whoami:', error);
-    throw error;
-  }
-};
 
 // Chat with Bedrock agent via proxy. Requires idToken for Cognito authorizer.
 // Now returns jobId for async processing.
