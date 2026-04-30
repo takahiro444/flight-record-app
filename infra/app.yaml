@@ -1,0 +1,355 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Flight Record App - Application layer (SAM).
+  Six Lambdas + REST API + Cognito authorizer.
+  Imports network/data/auth values from upstream stacks.
+  Build: `sam build`. Deploy: `sam deploy --guided` (first time) then `sam deploy`.
+
+Parameters:
+
+  ResourcePrefix:
+    Type: String
+    Default: flight-record-iac
+    AllowedPattern: '[a-z][a-z0-9-]{2,40}'
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+
+  NetworkStackName:
+    Type: String
+    Default: flight-record-iac-network
+
+  DataStackName:
+    Type: String
+    Default: flight-record-iac-data
+
+  AuthStackName:
+    Type: String
+    Default: flight-record-iac-auth
+
+  AiStackName:
+    Type: String
+    Default: flight-record-iac-ai
+    Description: Used to import Bedrock Agent IDs and AgentCore Runtime ARN. May not exist on first deploy; pass empty strings as overrides if so.
+
+  BedrockSupervisorAgentId:
+    Type: String
+    Default: ''
+    Description: Override if not yet managed by ai.yaml stack.
+
+  BedrockSupervisorAliasId:
+    Type: String
+    Default: ''
+
+  AgentCoreRuntimeArn:
+    Type: String
+    Default: ''
+    Description: AgentCore Runtime ARN for the email parser. Leave empty to skip wiring.
+
+  CorsAllowOrigin:
+    Type: String
+    Default: "'*'"
+    Description: CORS Access-Control-Allow-Origin (must be quoted, e.g. "'https://example.com'").
+
+Globals:
+
+  Function:
+    Runtime: python3.12
+    Architectures: [x86_64]
+    MemorySize: 256
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        ENVIRONMENT: !Ref Environment
+
+  Api:
+    EndpointConfiguration: REGIONAL
+    Cors:
+      AllowMethods: "'GET,POST,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: !Ref CorsAllowOrigin
+
+Resources:
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${ResourcePrefix}-api-${Environment}'
+      StageName: !Ref Environment
+      MethodSettings:
+        - HttpMethod: '*'
+          ResourcePath: '/*'
+          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: 10
+          MetricsEnabled: true
+          LoggingLevel: INFO
+      Auth:
+        DefaultAuthorizer: CognitoAuth
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn:
+              Fn::ImportValue: !Sub '${AuthStackName}-UserPoolArn'
+            Identity:
+              Header: Authorization
+
+  TalkToFlightRecordFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-talk-to-flight-record-${Environment}'
+      CodeUri: ../lambdas/talk-to-flight-record/
+      Handler: agentcore_handler.lambda_handler
+      MemorySize: 512
+      Timeout: 30
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub '${NetworkStackName}-PrivateSubnetIds'
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-LambdaSgId'
+      Environment:
+        Variables:
+          DB_SECRET_ARN:
+            Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+          DB_CONNECT_TIMEOUT_SECONDS: '30'
+          DB_APP_NAME: talk-to-flight-record-agent
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-haiku-*'
+                - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-3-5-haiku-*'
+      Events:
+        ChatPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /talk-to-flight-record
+            Method: POST
+        StatusGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /talk-to-flight-record/status/{jobId}
+            Method: GET
+
+  ProxyEmailParserFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-proxy-email-parser-${Environment}'
+      CodeUri: ../lambdas/proxy-email-parser-agent/
+      Handler: handler.lambda_handler
+      MemorySize: 512
+      Timeout: 900
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME:
+            Fn::ImportValue: !Sub '${DataStackName}-EmailParseJobsTableName'
+          BEDROCK_REGION: !Ref AWS::Region
+          AGENTCORE_RUNTIME_ARN: !Ref AgentCoreRuntimeArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                Fn::ImportValue: !Sub '${DataStackName}-EmailParseJobsTableArn'
+            - Effect: Allow
+              Action: bedrock-agentcore:InvokeAgentRuntime
+              Resource: !Sub 'arn:aws:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*'
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ResourcePrefix}-proxy-email-parser-${Environment}'
+      Events:
+        SubmitPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /parse-email-and-store
+            Method: POST
+        StatusGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /parse-email-and-store/status/{jobId}
+            Method: GET
+
+  RetrieveFlightDataFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-retrieve-flight-data-${Environment}'
+      CodeUri: ../lambdas/retrieve-flight-data/
+      Handler: lambda_function.lambda_handler
+      MemorySize: 128
+      Timeout: 60
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub '${NetworkStackName}-PrivateSubnetIds'
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-LambdaSgId'
+      Environment:
+        Variables:
+          RAPIDAPI_SECRET_ARN:
+            Fn::ImportValue: !Sub '${DataStackName}-RapidApiSecretArn'
+          DB_SECRET_ARN:
+            Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - Fn::ImportValue: !Sub '${DataStackName}-RapidApiSecretArn'
+                - Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+
+  DisplayFlightRecordFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-display-flight-record-${Environment}'
+      CodeUri: ../lambdas/display-flight-record-table/
+      Handler: lambda_function.lambda_handler
+      MemorySize: 128
+      Timeout: 15
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub '${NetworkStackName}-PrivateSubnetIds'
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-LambdaSgId'
+      Environment:
+        Variables:
+          DB_SECRET_ARN:
+            Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+      Events:
+        DisplayGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /display-flight-record-table
+            Method: GET
+
+  StoreFlightRecordFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-store-flight-record-${Environment}'
+      CodeUri: ../lambdas/store-flight-record/
+      Handler: lambda_function.lambda_handler
+      MemorySize: 256
+      Timeout: 30
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub '${NetworkStackName}-PrivateSubnetIds'
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-LambdaSgId'
+      Environment:
+        Variables:
+          DB_SECRET_ARN:
+            Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                Fn::ImportValue: !Sub '${DataStackName}-DbSecretArn'
+
+  ProxyBedrockAgentFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${ResourcePrefix}-proxy-bedrock-agent-${Environment}'
+      CodeUri: ../lambdas/proxy-flight-record-bedrock-agent/
+      Handler: handler.lambda_handler
+      MemorySize: 1024
+      Timeout: 120
+      VpcConfig:
+        SubnetIds: !Split
+          - ','
+          - Fn::ImportValue: !Sub '${NetworkStackName}-PrivateSubnetIds'
+        SecurityGroupIds:
+          - Fn::ImportValue: !Sub '${NetworkStackName}-LambdaSgId'
+      Environment:
+        Variables:
+          AGENT_ID: !Ref BedrockSupervisorAgentId
+          AGENT_ALIAS_ID: !Ref BedrockSupervisorAliasId
+          DYNAMODB_TABLE_NAME:
+            Fn::ImportValue: !Sub '${DataStackName}-ChatJobsTableName'
+          BEDROCK_REGION: !Ref AWS::Region
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+              Resource:
+                Fn::ImportValue: !Sub '${DataStackName}-ChatJobsTableArn'
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeAgent
+                - bedrock-agent-runtime:InvokeAgent
+              Resource: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent-alias/*'
+
+  ApiWafAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub '${ResourcePrefix}-api-waf-${Environment}'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub '${ResourcePrefix}-api-waf-${Environment}'
+      Rules:
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 0
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+
+  ApiWafAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/restapis/${Api}/stages/${Environment}'
+      WebACLArn: !GetAtt ApiWafAcl.Arn
+
+Outputs:
+
+  ApiUrl:
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiUrl'
+
+  ApiId:
+    Value: !Ref Api
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiId'

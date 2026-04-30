@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Flight Record App - AI layer.
+  Bedrock Agents (Supervisor + 2 collaborators) and the airline knowledge-base S3 bucket.
+  PARTIAL CFN coverage:
+    - Bedrock Knowledge Bases: supported but require an OpenSearch Serverless collection.
+      This template provisions the bucket only; the KB itself is left as a follow-up.
+    - AgentCore Runtime: not yet supported by CloudFormation. Build/deploy it via the
+      bedrock-agentcore-starter-toolkit CLI, then pass the runtime ARN as a parameter
+      to app.yaml.
+
+Parameters:
+
+  ResourcePrefix:
+    Type: String
+    Default: flight-record-iac
+    AllowedPattern: '[a-z][a-z0-9-]{2,40}'
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+
+  SupervisorModel:
+    Type: String
+    Default: anthropic.claude-3-5-haiku-20241022-v1:0
+
+  FlightRecordModel:
+    Type: String
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+
+  AirlineStatusModel:
+    Type: String
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+
+Resources:
+
+  AirlineKbBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ResourcePrefix}-airline-kb-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: Purpose
+          Value: bedrock-knowledge-base-source
+
+  BedrockAgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'AmazonBedrockExecutionRoleForAgents_${ResourcePrefix}_${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: InvokeFoundationModels
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/${SupervisorModel}'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/${FlightRecordModel}'
+                  - !Sub 'arn:aws:bedrock:${AWS::Region}::foundation-model/${AirlineStatusModel}'
+
+  AirlineStatusAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub '${ResourcePrefix}-airline-status-${Environment}'
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      FoundationModel: !Ref AirlineStatusModel
+      IdleSessionTTLInSeconds: 600
+      Instruction: |
+        You are an airline frequent flyer program specialist. Answer questions about
+        status tier requirements, benefits, qualification rules, and policies for
+        United MileagePlus and Delta SkyMiles. Use the attached knowledge base as
+        your source of truth. Be concise and cite the program name in answers.
+      AutoPrepare: true
+
+  FlightRecordAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub '${ResourcePrefix}-flight-record-${Environment}'
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      FoundationModel: !Ref FlightRecordModel
+      IdleSessionTTLInSeconds: 600
+      Instruction: |
+        You are a personal flight history specialist. Answer questions about the
+        user's flight records, miles flown, trip statistics, and history.
+        Always include relevant numbers and dates. The user must be authenticated;
+        their Cognito sub is provided in session attributes.
+      AutoPrepare: true
+
+  AirlineStatusAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref AirlineStatusAgent
+      AgentAliasName: live
+
+  FlightRecordAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref FlightRecordAgent
+      AgentAliasName: live
+
+  SupervisorAgent:
+    Type: AWS::Bedrock::Agent
+    Properties:
+      AgentName: !Sub '${ResourcePrefix}-supervisor-${Environment}'
+      AgentResourceRoleArn: !GetAtt BedrockAgentRole.Arn
+      FoundationModel: !Ref SupervisorModel
+      IdleSessionTTLInSeconds: 600
+      AgentCollaboration: SUPERVISOR
+      Instruction: |
+        You are an intelligent flight record assistant supervisor that coordinates
+        between specialist agents.
+
+        - For personal flight history, miles, and trip statistics, consult the
+          Flight Record specialist.
+        - For airline status programs, tier requirements, qualification rules,
+          and benefits, consult the Airline Status specialist.
+        - For complex questions that need both (e.g. "what status do I qualify
+          for?"), consult both and synthesize.
+
+        Always answer with specific numbers and details.
+      AutoPrepare: true
+      AgentCollaborators:
+        - CollaboratorName: Airline-Status-Agent
+          AgentDescriptor:
+            AliasArn: !GetAtt AirlineStatusAgentAlias.AgentAliasArn
+          CollaborationInstruction: >
+            Use this agent to query airline frequent flyer program information
+            including status tier requirements, benefits, qualification rules,
+            and policies for United MileagePlus and Delta SkyMiles.
+          RelayConversationHistory: TO_COLLABORATOR
+        - CollaboratorName: Flight-Record-Agent
+          AgentDescriptor:
+            AliasArn: !GetAtt FlightRecordAgentAlias.AgentAliasArn
+          CollaborationInstruction: >
+            Use this agent to query the user's personal flight records, trip
+            history, miles flown, and flight statistics.
+          RelayConversationHistory: TO_COLLABORATOR
+
+  SupervisorAgentAlias:
+    Type: AWS::Bedrock::AgentAlias
+    Properties:
+      AgentId: !Ref SupervisorAgent
+      AgentAliasName: live
+
+Outputs:
+
+  AirlineKbBucketName:
+    Value: !Ref AirlineKbBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-AirlineKbBucketName'
+
+  SupervisorAgentId:
+    Value: !Ref SupervisorAgent
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentId'
+
+  SupervisorAgentAliasId:
+    Value: !GetAtt SupervisorAgentAlias.AgentAliasId
+    Export:
+      Name: !Sub '${AWS::StackName}-SupervisorAgentAliasId'
+
+  BedrockAgentRoleArn:
+    Value: !GetAtt BedrockAgentRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BedrockAgentRoleArn'

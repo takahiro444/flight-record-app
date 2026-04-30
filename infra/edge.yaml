@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Flight Record App - Edge layer.
+  S3 bucket for SPA + CloudFront with Origin Access Control + optional global WAF.
+  Deploy this stack in us-east-1 if you attach a global WAF; otherwise any region works
+  (CloudFront itself is global; only the WAF requires us-east-1).
+
+Parameters:
+
+  ResourcePrefix:
+    Type: String
+    Default: flight-record-iac
+    AllowedPattern: '[a-z][a-z0-9-]{2,40}'
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+
+  WebAclArn:
+    Type: String
+    Default: ''
+    Description: Optional global WAF Web ACL ARN (must be in us-east-1, scope=CLOUDFRONT). Leave empty to skip.
+
+Conditions:
+
+  AttachWaf: !Not [!Equals [!Ref WebAclArn, '']]
+
+Resources:
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${ResourcePrefix}-frontend-${Environment}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: Environment
+          Value: !Ref Environment
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${ResourcePrefix}-oac-${Environment}'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: !Sub 'Flight Record SPA (${Environment})'
+        Enabled: true
+        HttpVersion: http2
+        PriceClass: PriceClass_All
+        DefaultRootObject: app/index.html
+        WebACLId: !If [AttachWaf, !Ref WebAclArn, !Ref AWS::NoValue]
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /app/index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /app/index.html
+            ErrorCachingMinTTL: 0
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}'
+
+Outputs:
+
+  FrontendBucketName:
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendBucketName'
+
+  DistributionId:
+    Value: !Ref Distribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
+
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionDomain'
