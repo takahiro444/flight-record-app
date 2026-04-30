@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Flight Record App - Data layer.
+  Postgres RDS + 2 DynamoDB tables + Secrets Manager entries.
+  Imports network values from the network stack.
+  All stateful resources use DeletionPolicy: Retain.
+
+Parameters:
+
+  ResourcePrefix:
+    Type: String
+    Default: flight-record-iac
+    AllowedPattern: '[a-z][a-z0-9-]{2,40}'
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, prod]
+
+  NetworkStackName:
+    Type: String
+    Default: flight-record-iac-network
+    Description: Name of the network stack to import VPC/subnet/SG values from.
+
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+
+  DbAllocatedStorage:
+    Type: Number
+    Default: 20
+    MinValue: 20
+
+  DbName:
+    Type: String
+    Default: postgres
+
+  DbMasterUsername:
+    Type: String
+    Default: dbadmin
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]{0,15}'
+    Description: RDS master username. Cannot be 'admin', 'rdsadmin', etc.
+
+Resources:
+
+  DbCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${ResourcePrefix}-db-${Environment}'
+      Description: Postgres credentials for flight-record RDS (auto-generated password)
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username":"${DbMasterUsername}"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\'
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  RapidApiSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Sub '${ResourcePrefix}-rapidapi-${Environment}'
+      Description: AeroDataBox RapidAPI key. Populate via console or CLI after stack creation.
+      SecretString: '{"x-rapidapi-key":"REPLACE_ME"}'
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private subnets for flight-record RDS
+      SubnetIds: !Split
+        - ','
+        - !ImportValue
+          'Fn::Sub': '${NetworkStackName}-PrivateSubnetIds'
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      DBInstanceIdentifier: !Sub '${ResourcePrefix}-${Environment}'
+      Engine: postgres
+      EngineVersion: '17.2'
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: !Ref DbAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: !Ref DbName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DbCredentialsSecret}::username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DbCredentialsSecret}::password}}'
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups:
+        - !ImportValue
+          'Fn::Sub': '${NetworkStackName}-RdsSgId'
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      DeletionProtection: false
+      EnablePerformanceInsights: false
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: Environment
+          Value: !Ref Environment
+
+  DbSecretAttachment:
+    Type: AWS::SecretsManager::SecretTargetAttachment
+    Properties:
+      SecretId: !Ref DbCredentialsSecret
+      TargetId: !Ref DbInstance
+      TargetType: AWS::RDS::DBInstance
+
+  FlightChatJobsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-chat-jobs-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expireAt
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: Environment
+          Value: !Ref Environment
+
+  FlightEmailParseJobsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Sub '${ResourcePrefix}-email-parse-jobs-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: jobId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: jobId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expireAt
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: flight-record-app
+        - Key: Environment
+          Value: !Ref Environment
+
+Outputs:
+
+  DbEndpoint:
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DbEndpoint'
+
+  DbPort:
+    Value: !GetAtt DbInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${AWS::StackName}-DbPort'
+
+  DbSecretArn:
+    Value: !Ref DbCredentialsSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-DbSecretArn'
+
+  RapidApiSecretArn:
+    Value: !Ref RapidApiSecret
+    Export:
+      Name: !Sub '${AWS::StackName}-RapidApiSecretArn'
+
+  ChatJobsTableName:
+    Value: !Ref FlightChatJobsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-ChatJobsTableName'
+
+  ChatJobsTableArn:
+    Value: !GetAtt FlightChatJobsTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-ChatJobsTableArn'
+
+  EmailParseJobsTableName:
+    Value: !Ref FlightEmailParseJobsTable
+    Export:
+      Name: !Sub '${AWS::StackName}-EmailParseJobsTableName'
+
+  EmailParseJobsTableArn:
+    Value: !GetAtt FlightEmailParseJobsTable.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-EmailParseJobsTableArn'
