@@ -414,7 +414,7 @@ const App = () => {
   return (
     <Layout>
       <CssBaseline />
-      <AppBar position="static" color="primary" elevation={1} sx={{ mb: 3 }}>
+      <AppBar position="sticky" color="primary" elevation={1} sx={{ top: 0, mb: 3, zIndex: (t) => t.zIndex.appBar }}>
         <Toolbar>
           <Stack direction="row" alignItems="center" spacing={1.5} sx={{ flexGrow: 1 }}>
             <Box
