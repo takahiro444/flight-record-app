@@ -22,7 +22,7 @@ import { useAuth } from '../auth/AuthContext';
 
 // Presentational form with toggle: manual entry or email paste
 const FlightForm = ({ onApiKeyChange, fetchFlightData, loading, error }) => {
-  const { idToken, claims } = useAuth();
+  const { idToken } = useAuth();
   const [apiKey, setApiKey] = useState('');
   const [mode, setMode] = useState('email'); // 'manual' or 'email'
   
