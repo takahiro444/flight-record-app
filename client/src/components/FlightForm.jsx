@@ -68,7 +68,6 @@ const FlightForm = ({ onApiKeyChange, fetchFlightData, loading, error }) => {
       // Submit email for parsing
       const response = await postEmailParser({
         emailText: emailText,
-        userSub: claims?.sub,
         idToken
       });
       

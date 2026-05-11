@@ -27,15 +27,15 @@ class ActionGroupError(Exception):
 
 
 def _extract_user_sub(event: Dict[str, Any], args: Dict[str, Any]) -> str | None:
-    """Pull user_sub from sessionAttributes, promptSessionAttributes, or args."""
+    """Pull user_sub from session/prompt attributes only.
+
+    The proxy populates sessionAttributes.user_sub from the verified Cognito JWT
+    claim before invoking the agent. LLM-supplied tool args are untrusted (the
+    model could be prompt-injected) and must never be a source of identity.
+    """
     session = event.get("sessionAttributes", {}) or {}
     prompt = event.get("promptSessionAttributes", {}) or {}
-    return (
-        args.get("user_sub")
-        or session.get("user_sub")
-        or prompt.get("user_sub")
-        or args.get("sub")
-    )
+    return session.get("user_sub") or prompt.get("user_sub")
 
 
 def _gather_args(event: Dict[str, Any]) -> Tuple[str | None, Dict[str, Any]]:

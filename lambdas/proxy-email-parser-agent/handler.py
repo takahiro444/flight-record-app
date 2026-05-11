@@ -57,10 +57,13 @@ def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _extract_user_info(event: Dict[str, Any], body: Dict[str, Any]) -> tuple:
-    """Extract user_sub and user_email from Cognito claims"""
+    """Extract user_sub and user_email from the verified Cognito JWT claims only.
+
+    The request body is untrusted input and must never override identity claims.
+    """
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
-    user_sub = body.get("user_sub") or claims.get("sub")
-    user_email = body.get("user_email") or claims.get("email")
+    user_sub = claims.get("sub")
+    user_email = claims.get("email")
     return user_sub, user_email
 
 

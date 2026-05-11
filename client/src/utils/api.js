@@ -49,8 +49,10 @@ export const fetchFlightRecords = async (apiKey) => {
 
 
 // Chat with Bedrock agent via proxy. Requires idToken for Cognito authorizer.
+// The server derives user identity from the verified JWT claims; the body
+// never carries user_sub.
 // Now returns jobId for async processing.
-export const postFlightChat = async ({ question, userSub, idToken }) => {
+export const postFlightChat = async ({ question, idToken }) => {
   try {
     const response = await fetch(`${API_BASE_URL}/talk-to-flight-record`, {
       method: 'POST',
@@ -58,7 +60,7 @@ export const postFlightChat = async ({ question, userSub, idToken }) => {
         'Content-Type': 'application/json',
         ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
       },
-      body: JSON.stringify({ question, user_sub: userSub }),
+      body: JSON.stringify({ question }),
     });
 
     if (!response.ok) {
@@ -165,7 +167,7 @@ export const pollChatResult = async ({ jobId, idToken, onProgress }) => {
 // ====================
 
 // Submit email text for parsing. Returns jobId for async processing.
-export const postEmailParser = async ({ emailText, userSub, idToken }) => {
+export const postEmailParser = async ({ emailText, idToken }) => {
   try {
     const response = await fetch(`${API_BASE_URL}/parse-email-and-store`, {
       method: 'POST',
@@ -173,9 +175,8 @@ export const postEmailParser = async ({ emailText, userSub, idToken }) => {
         'Content-Type': 'application/json',
         ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
       },
-      body: JSON.stringify({ 
+      body: JSON.stringify({
         email_text: emailText,
-        user_sub: userSub 
       }),
     });
 

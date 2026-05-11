@@ -49,8 +49,10 @@ def _parse_body(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _extract_user_sub(event: Dict[str, Any], body: Dict[str, Any]) -> str | None:
+    # Identity is taken ONLY from the verified Cognito JWT claims.
+    # The request body is untrusted input and must never be a source of identity.
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
-    return body.get("user_sub") or claims.get("sub") or claims.get("cognito:username")
+    return claims.get("sub") or claims.get("cognito:username")
 
 
 def _route(event: Dict[str, Any]) -> str:
