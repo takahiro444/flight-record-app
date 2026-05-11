@@ -60,7 +60,7 @@ const ChatWidget = ({ isAuthenticated, idToken, userSub, defaultQuestion = '', o
     setMessages(prev => [...prev, { role: 'user', text: q }]);
     
     try {
-      const resp = await postFlightChat({ question: q, userSub, idToken });
+      const resp = await postFlightChat({ question: q, idToken });
       
       // Check if response is async (has jobId) or sync (has answer)
       if (resp?.jobId) {
